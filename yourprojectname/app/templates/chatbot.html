@@ -1,62 +1,114 @@
-{%load static%}
+{% load static %}
+
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Recorder</title>
+    <title>Record Audio</title>
 </head>
 
 <body>
-    <button id="startRecording">Start Recording</button>
-    <button id="stopRecording" disabled>Stop Recording</button>
-    <audio controls id="audioPlayer"></audio>
+    <h1>Record Audio</h1>
+    <button id="record-button">Start Recording</button>
+    <button id="stop-button" disabled>Stop Recording</button>
+    <button id="play-button" disabled>Play Recording</button>
+    <p id="message"></p>
 
-    <script src="record.js"></script>
-
+    <audio id="audio" controls></audio>
+    <!-- Add an audio element for playback -->
 
     <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const startRecordingButton = document.getElementById('startRecording');
-    const stopRecordingButton = document.getElementById('stopRecording');
-    const audioPlayer = document.getElementById('audioPlayer');
+        // Define DOM elements
+        const recordButton = document.getElementById('record-button');
+        const stopButton = document.getElementById('stop-button');
+        const playButton = document.getElementById('play-button');
+        const messageEl = document.getElementById('message');
+        const audioEl = document.getElementById('audio');
+        let mediaRecorder; // Declare mediaRecorder outside event listeners
 
-    let mediaRecorder;
-    let audioChunks = [];
-
-    async function startRecording() {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                audioChunks.push(event.data);
-            }
-        };
-
-        mediaRecorder.onstop = () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            const audioUrl = URL.createObjectURL(audioBlob);
-            audioPlayer.src = audioUrl;
-        };
-
-        mediaRecorder.start();
-        startRecordingButton.disabled = true;
-        stopRecordingButton.disabled = false;
-    }
-
-    function stopRecording() {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-            startRecordingButton.disabled = false;
-            stopRecordingButton.disabled = true;
+        // Check browser support for audio recording
+        if (!navigator.mediaDevices.getUserMedia) {
+            messageEl.textContent = 'Your browser does not support audio recording.';
         }
-    }
 
-    startRecordingButton.addEventListener('click', startRecording);
-    stopRecordingButton.addEventListener('click', stopRecording);
-});
+        // Start recording audio
+        recordButton.addEventListener('click', () => {
+            navigator.mediaDevices.getUserMedia({
+                    audio: true
+                })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    const audioChunks = [];
 
+                    // Capture audio data chunks
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        audioChunks.push(event.data);
+                    });
+
+                    // Update buttons and message during recording
+                    recordButton.disabled = true;
+                    stopButton.disabled = false;
+                    playButton.disabled = true; // Disable play button during recording
+                    messageEl.textContent = 'Recording...';
+
+                    // Convert audio chunks to blob and send to Django backend
+                    mediaRecorder.onstop = function() {
+                        const blob = new Blob(audioChunks, {
+                            type: 'audio/wav'
+                        });
+                        const formData = new FormData();
+                        formData.append('audio', blob, 'recording.wav');
+
+                        // Replace 'your_url' with your actual Django URL
+                        fetch('transcribe_audio/', {
+                                method: 'POST',
+                                body: formData,
+                            })
+                            .then(response => {
+                                if (!response.ok) {
+                                    throw new Error(`HTTP error! Status: ${response.status}`);
+                                }
+                                console.log(response); // Log the entire response for debugging
+                                return response.json();
+                            })
+                            .then(data => {
+                                console.log(data); // Log the parsed JSON data
+                                messageEl.textContent = 'Audio uploaded successfully.';
+                                // Update buttons and message
+                                stopButton.disabled = true;
+                                recordButton.disabled = false;
+                                playButton.disabled = false; // Enable play button after recording
+                                audioEl.src = URL.createObjectURL(blob); // Set audio source for playback
+                            })
+                            .catch(error => {
+                                console.error(error); // Log any errors to the console
+                                messageEl.textContent = 'Error uploading audio: ' + error.message;
+                            });
+                    };
+
+                    // Start recording
+                    mediaRecorder.start();
+                })
+                .catch(error => {
+                    console.error(error);
+                    messageEl.textContent = 'Error accessing microphone: ' + error.message;
+                });
+        });
+
+        // Stop recording audio
+        stopButton.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        });
+
+        // Play recorded audio
+        playButton.addEventListener('click', () => {
+            if (audioEl.src && (audioEl.paused || audioEl.ended)) {
+                audioEl.play();
+            }
+        });
     </script>
 </body>
 
